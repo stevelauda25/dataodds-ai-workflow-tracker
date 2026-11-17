@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>DataOdds AI workflow tracker</title>
+    <style>
+      :root {
+        --text: #1a1a1a;
+        --muted: #5f6368;
+        --line: #e3e3e0;
+        --live: #1a7f37;
+        --live-bg: #e6f4ea;
+        --partly: #8a5a00;
+        --partly-bg: #fdf0d0;
+        --planned: #57606a;
+        --planned-bg: #eceef0;
+        --unknown: #b42318;
+        --unknown-bg: #fde8e6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem 4rem;
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: var(--text);
+        background: #fff;
+      }
+      main {
+        max-width: 46rem;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.5rem;
+      }
+      h2 {
+        margin: 2.5rem 0 0;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 1.1rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.25rem 1rem;
+      }
+      h2 small {
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .meta {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .summary {
+        margin: 1.5rem 0 0.5rem;
+        font-size: 1.35rem;
+        font-weight: 600;
+      }
+      .summary .live {
+        color: var(--live);
+      }
+      .summary .partly-live {
+        color: var(--partly);
+      }
+      .summary .planned {
+        color: var(--planned);
+      }
+      .bar {
+        display: flex;
+        height: 0.5rem;
+        border-radius: 0.25rem;
+        overflow: hidden;
+        background: var(--planned-bg);
+      }
+      .bar span.live {
+        background: var(--live);
+      }
+      .bar span.partly-live {
+        background: #e0a100;
+      }
+      .bar span.planned {
+        background: #c4c9ce;
+      }
+      .warning {
+        margin: 1rem 0 0;
+        padding: 0.75rem 1rem;
+        border-radius: 0.375rem;
+        background: var(--unknown-bg);
+        color: var(--unknown);
+        font-size: 0.95rem;
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      li {
+        display: grid;
+        grid-template-columns: 6.5rem 1fr;
+        gap: 0 1rem;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .badge {
+        justify-self: start;
+        align-self: start;
+        margin-top: 0.1rem;
+        padding: 0.1rem 0.55rem;
+        border-radius: 1rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .badge.live {
+        color: var(--live);
+        background: var(--live-bg);
+      }
+      .badge.partly-live {
+        color: var(--partly);
+        background: var(--partly-bg);
+      }
+      .badge.planned {
+        color: var(--planned);
+        background: var(--planned-bg);
+      }
+      .badge.unknown {
+        color: var(--unknown);
+        background: var(--unknown-bg);
+      }
+      .item {
+        font-weight: 600;
+      }
+      .note {
+        color: var(--muted);
+      }
+      .who {
+        justify-self: start;
+        align-self: start;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      code {
+        font: 0.875em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        padding: 0.1em 0.3em;
+        border-radius: 0.25rem;
+        background: #f2f2f0;
+      }
+      footer {
+        margin-top: 3rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      a {
+        color: inherit;
+      }
+      @media (max-width: 30rem) {
+        li {
+          grid-template-columns: 1fr;
+          gap: 0.35rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <h1>DataOdds AI workflow</h1>
+      <p class="meta">Loading…</p>
+    </main>
+    <script>
+      const DATA_FILE = "tracker.md";
+      const EDIT_URL =
+        "https://github.com/stevelauda25/dataodds-ai-workflow-tracker/edit/main/tracker.md";
+
+      const STATUSES = [
+        { key: "live", label: "Live" },
+        { key: "partly live", label: "Partly live" },
+        { key: "planned", label: "Planned" },
+      ];
+
+      function splitRow(line) {
+        return line
+          .replace(/^\|/, "")
+          .replace(/\|$/, "")
+          .split(/(?<!\\)\|/)
+          .map((cell) => cell.trim().replace(/\\\|/g, "|"));
+      }
+
+      function parse(markdown) {
+        const doc = { title: "", sections: [] };
+        let section = null;
+        const visible = markdown.replace(/<!--[\s\S]*?-->/g, "");
+        for (const raw of visible.split(/\r?\n/)) {
+          const line = raw.trim();
+          if (line.startsWith("# ")) {
+            doc.title = line.slice(2).trim();
+          } else if (line.startsWith("## ")) {
+            section = { name: line.slice(3).trim(), columns: null, rows: [] };
+            doc.sections.push(section);
+          } else if (line.startsWith("|") && section) {
+            const cells = splitRow(line);
+            if (!section.columns) {
+              section.columns = cells.map((cell) => cell.toLowerCase());
+            } else if (!cells.every((cell) => /^:?-+:?$/.test(cell))) {
+              section.rows.push(cells);
+            }
+          }
+        }
+        return doc;
+      }
+
+      function column(section, name) {
+        const index = section.columns ? section.columns.indexOf(name) : -1;
+        return (row) => (index >= 0 && row[index]) || "";
+      }
+
+      function toModel(doc) {
+        const areas = [];
+        const questions = [];
+        for (const section of doc.sections) {
+          if (section.columns && section.columns.includes("status")) {
+            const item = column(section, "item");
+            const status = column(section, "status");
+            const notes = column(section, "notes");
+            areas.push({
+              name: section.name,
+              items: section.rows.map((row) => {
+                const written = status(row);
+                const known = STATUSES.find(
+                  (s) => s.key === written.toLowerCase().replace(/\s+/g, " "),
+                );
+                return {
+                  name: item(row),
+                  note: notes(row),
+                  status: known || null,
+                  written,
+                };
+              }),
+            });
+          } else if (section.columns && section.columns.includes("question")) {
+            const question = column(section, "question");
+            const who = column(section, "who");
+            for (const row of section.rows) {
+              questions.push({ text: question(row), who: who(row) });
+            }
+          }
+        }
+        return { title: doc.title, areas, questions };
+      }
+
+      function count(items) {
+        return STATUSES.map((status) => ({
+          status,
+          total: items.filter((item) => item.status === status).length,
+        }));
+      }
+
+      function countText(counts) {
+        return counts
+          .filter((c) => c.total > 0)
+          .map((c) => `${c.total} ${c.status.label.toLowerCase()}`)
+          .join(", ");
+      }
+
+      function el(tag, className, children) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        for (const child of [].concat(children || [])) {
+          node.append(child);
+        }
+        return node;
+      }
+
+      function inline(text) {
+        return text
+          .split("`")
+          .map((part, index) => (index % 2 ? el("code", "", part) : part));
+      }
+
+      function cssClass(status) {
+        return status ? status.key.replace(" ", "-") : "unknown";
+      }
+
+      function render(model, updated) {
+        const items = model.areas.flatMap((area) => area.items);
+        const counts = count(items);
+        const unknown = model.areas.flatMap((area) =>
+          area.items
+            .filter((item) => !item.status)
+            .map((item) => `"${item.name}" in ${area.name} says "${item.written}"`),
+        );
+
+        const nodes = [el("h1", "", model.title || "DataOdds AI workflow")];
+        nodes.push(
+          el(
+            "p",
+            "meta",
+            `${items.length} items in ${model.areas.length} areas` +
+              (updated ? ` · updated ${updated}` : ""),
+          ),
+        );
+
+        const summary = el("p", "summary");
+        counts.forEach((c, index) => {
+          if (index) summary.append(", ");
+          summary.append(
+            el("span", cssClass(c.status), `${c.total} ${c.status.label.toLowerCase()}`),
+          );
+        });
+        nodes.push(summary);
+
+        const bar = el("div", "bar");
+        bar.setAttribute("role", "img");
+        bar.setAttribute("aria-label", countText(counts));
+        for (const c of counts) {
+          const segment = el("span", cssClass(c.status));
+          segment.style.flex = String(c.total);
+          bar.append(segment);
+        }
+        nodes.push(bar);
+
+        if (unknown.length) {
+          nodes.push(
+            el(
+              "p",
+              "warning",
+              `Not counted, because the status isn't Live, Partly live or Planned: ${unknown.join("; ")}.`,
+            ),
+          );
+        }
+
+        for (const area of model.areas) {
+          nodes.push(
+            el("h2", "", [area.name, el("small", "", countText(count(area.items)))]),
+          );
+          nodes.push(
+            el(
+              "ul",
+              "",
+              area.items.map((item) =>
+                el("li", "", [
+                  el(
+                    "span",
+                    `badge ${cssClass(item.status)}`,
+                    item.status ? item.status.label : item.written || "No status",
+                  ),
+                  el("div", "", [
+                    el("div", "item", inline(item.name)),
+                    el("div", "note", inline(item.note)),
+                  ]),
+                ]),
+              ),
+            ),
+          );
+        }
+
+        if (model.questions.length) {
+          nodes.push(
+            el("h2", "", [
+              "Open questions",
+              el("small", "", `${model.questions.length} open`),
+            ]),
+          );
+          nodes.push(
+            el(
+              "ul",
+              "",
+              model.questions.map((question) =>
+                el("li", "", [
+                  el("span", "who", question.who),
+                  el("div", "item", inline(question.text)),
+                ]),
+              ),
+            ),
+          );
+        }
+
+        const editLink = el("a", "", el("code", "", DATA_FILE));
+        editLink.href = EDIT_URL;
+        nodes.push(
+          el("footer", "", [
+            "To update this page, edit ",
+            editLink,
+            ". Nothing else needs to change.",
+          ]),
+        );
+
+        document.getElementById("app").replaceChildren(...nodes);
+      }
+
+      function showError(message) {
+        document
+          .getElementById("app")
+          .replaceChildren(
+            el("h1", "", "DataOdds AI workflow"),
+            el("p", "warning", message),
+          );
+      }
+
+      async function load() {
+        const response = await fetch(DATA_FILE, { cache: "no-cache" });
+        if (!response.ok) {
+          throw new Error(`${DATA_FILE} returned ${response.status}`);
+        }
+        const modified = response.headers.get("last-modified");
+        const updated = modified
+          ? new Date(modified).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })
+          : "";
+        render(toModel(parse(await response.text())), updated);
+      }
+
+      load().catch((error) => showError(`Couldn't load the tracker: ${error.message}`));
+    </script>
+  </body>
+</html>
